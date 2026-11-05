@@ -1,0 +1,2 @@
+# Let the logged-in user open the AVerMedia ExtremeCap U3 (CV710) without root.
+SUBSYSTEM=="usb", ATTR{idVendor}=="07ca", ATTR{idProduct}=="0710", MODE="0660", TAG+="uaccess"

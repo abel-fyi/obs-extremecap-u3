@@ -1,0 +1,10 @@
+build/
+runs/
+venv/
+.DS_Store
+# Local research material (vendor software, traces, captures) is never published.
+research/*
+!research/LOG.md
+*.exe
+*.dmg
+__pycache__/
