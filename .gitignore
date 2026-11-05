@@ -2,6 +2,9 @@ build/
 runs/
 venv/
 .DS_Store
+._*
+Thumbs.db
+desktop.ini
 # Local research material (vendor software, traces, captures) is never published.
 research/*
 !research/LOG.md

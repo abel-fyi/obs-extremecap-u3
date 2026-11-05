@@ -60,6 +60,15 @@ the end: what was tried, what happened, what it proves.
 - The OBS source delivers YUY2 video and 16-bit stereo audio directly; verified
   with OBS screenshots, audio meters, HDMI loss and mode changes.
 
+## Status LED
+
+- The original driver has `LEDMode00`–`18` functions writing FPGA registers
+  0x80–0x86. Replaying them on the card with the owner watching: colour 1 = red,
+  2 = blue, 3 = both (pink); styles steady, blink, fade; multi-step patterns
+  with per-step durations. Reading back after a two-step pattern only returns
+  the last step, so the plugin writes a complete idle pattern (blue breathing)
+  on exit instead of "restoring" a half-readable one.
+
 ## Open questions
 
 - Interlaced modes (1080i/480i/576i): fields not yet examined.

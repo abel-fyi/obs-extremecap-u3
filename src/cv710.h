@@ -27,4 +27,6 @@ struct cv710_callbacks {
 };
 
 struct cv710 *cv710_start(const struct cv710_callbacks *callbacks);
+/* Status LED: red while recording/streaming, blue otherwise; blinking = no picture. */
+void cv710_set_recording(struct cv710 *cv710, bool recording);
 void cv710_stop(struct cv710 *cv710);

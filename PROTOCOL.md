@@ -64,3 +64,12 @@ Every progressive mode arrives at its native size (tested 640×480 to 1920×1080
 so markers are unambiguous outside audio records. Audio runs at the source's
 32/44.1/48 kHz; with no source audio the card sends zero-filled records at a
 mode-dependent size, which the core ignores. Interlaced modes are not yet handled.
+
+## Status LED
+
+FPGA registers 0x80–0x86 describe one step of an LED pattern; 0x86 stores it.
+0x80 = colour << 4 | style (colour 1 red, 2 blue, 3 both = pink; style 1 steady,
+2 blink, 3 fade), 0x81 brightness %, 0x82 fade start %, 0x83/0x84 step length in
+ms (big-endian), 0x85 = 2 for fades, 0x86 = steps << 4 | step (0x11 steady;
+0x21/0x22 two-step pattern; up to 0x44). Only the last written step reads back.
+The card's own power-on pattern is a blue blink.

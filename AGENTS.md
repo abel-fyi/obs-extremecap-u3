@@ -1,6 +1,6 @@
 # Notes for coding agents
 
-Read README.md and PROTOCOL.md first. Work autonomously; ask only for physical
+Read README.txt and PROTOCOL.md first. Work autonomously; ask only for physical
 actions (replugging the card, changing cables or sources). Keep docs short.
 
 ## Hardware rules (each was learned the hard way)

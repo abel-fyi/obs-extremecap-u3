@@ -24,6 +24,10 @@ struct cv710 {
 	bool ok;                  /* sticky: false after any USB failure */
 	int released;             /* receiver reset state: -1 unknown, 0 held, 1 running */
 	uint8_t lfe_saved[9];
+	/* status LED */
+	atomic_bool recording;
+	enum cv710_state state;
+	int led_shown;
 	/* stream parser */
 	enum { SEEK, PAYLOAD, TAIL, AUDIO } ps;
 	uint64_t window;          /* last 8 bytes seen while seeking */
@@ -68,6 +72,7 @@ static void logf_(struct cv710 *c, const char *fmt, ...)
 
 static void set_state(struct cv710 *c, enum cv710_state state, const struct cv710_mode *mode)
 {
+	c->state = state;
 	if (c->cb.state)
 		c->cb.state(c->cb.ctx, state, mode);
 }
@@ -408,6 +413,60 @@ static void lfe_write(struct cv710 *c, int reg, uint8_t v)
 	bulk(c, 0x01, cmd, 5);
 }
 
+/* ---- Status LED --------------------------------------------------------------
+ * FPGA registers 0x80-0x86 program up to four steps: 0x80 = colour << 4 | style
+ * (1 steady, 2 blink, 3 fade), 0x81 brightness in %, 0x82 fade start in %,
+ * 0x83/0x84 step length in ms, 0x85 fade (2), 0x86 = steps << 4 | step. Colours: 1 red, 2 blue, 3 both (pink).
+ * Steady = all good; blinking = needs attention; red = OBS is recording. */
+enum { RED = 1, BLUE = 2, PINK = 3 };
+
+static void led(struct cv710 *c, int colour, bool blink)
+{
+	int code = colour << 1 | blink;
+	if (code == c->led_shown)
+		return;
+	c->led_shown = code;
+	uint8_t style = (uint8_t)(colour << 4 | (blink ? 2 : 1));
+	if (!blink) {
+		lfe_write(c, 0x80, style);
+		lfe_write(c, 0x81, 100);
+		lfe_write(c, 0x86, 0x11);
+		return;
+	}
+	for (int step = 1; step <= 2; step++) { /* 200 ms off, 200 ms on */
+		lfe_write(c, 0x80, style);
+		lfe_write(c, 0x81, step == 1 ? 0 : 100);
+		lfe_write(c, 0x83, 0);
+		lfe_write(c, 0x84, 200);
+		lfe_write(c, 0x86, (uint8_t)(0x20 | step));
+	}
+}
+
+/* When we let go of the card: blue breathing (1 s fade in, 1 s fade out). */
+static void led_idle(struct cv710 *c)
+{
+	for (int step = 1; step <= 2; step++) {
+		lfe_write(c, 0x80, BLUE << 4 | 3); /* style 3: fade */
+		lfe_write(c, 0x81, step == 1 ? 0 : 100);
+		lfe_write(c, 0x82, step == 1 ? 100 : 0);
+		lfe_write(c, 0x83, 0x03);
+		lfe_write(c, 0x84, 0xe8);
+		lfe_write(c, 0x85, 2);
+		lfe_write(c, 0x86, (uint8_t)(0x20 | step));
+	}
+}
+
+static void led_update(struct cv710 *c)
+{
+	int colour = atomic_load(&c->recording) ? RED : BLUE;
+	if (c->state == CV710_LIVE)
+		led(c, colour, false);
+	else if (c->state == CV710_UNSUPPORTED)
+		led(c, PINK, true);
+	else
+		led(c, colour, true);
+}
+
 /* Stream the current mode until the signal changes, stalls, or we are stopped. */
 static void stream(struct cv710 *c)
 {
@@ -439,6 +498,7 @@ static void stream(struct cv710 *c)
 	uint64_t checked = now_ns();
 	while (c->ok && c->running && !atomic_load(&c->stop)) {
 		struct timeval tv = {0, 50000};
+		led_update(c);
 		libusb_handle_events_timeout(c->usb, &tv);
 		if (now_ns() - checked > 500000000u) {
 			checked = now_ns();
@@ -475,6 +535,7 @@ static bool wait_stable(struct cv710 *c, struct cv710_mode *m)
 	uint64_t since = 0;
 	while (c->ok && !atomic_load(&c->stop)) {
 		struct cv710_mode cur;
+		led_update(c);
 		if (timing(c, &cur)) {
 			if (!since || !same_mode(&cur, &prev))
 				since = now_ns(), prev = cur;
@@ -504,6 +565,7 @@ static void session(struct cv710 *c)
 		if (bulk(c, 0x01, cmd, 5))
 			bulk(c, 0x81, &c->lfe_saved[lfe_regs[i]], 1);
 	}
+	c->led_shown = -1;
 	receiver_init(c);
 	scaler_bypass(c, vx);
 	if (c->ok)
@@ -518,8 +580,10 @@ static void session(struct cv710 *c)
 		if (!supported(&m)) {
 			struct cv710_mode cur;
 			set_state(c, CV710_UNSUPPORTED, &m);
-			while (c->ok && !atomic_load(&c->stop) && timing(c, &cur) && same_mode(&cur, &m))
+			while (c->ok && !atomic_load(&c->stop) && timing(c, &cur) && same_mode(&cur, &m)) {
+				led_update(c);
 				sleep_ms(250);
+			}
 			continue;
 		}
 		set_state(c, CV710_LIVE, &m);
@@ -532,6 +596,7 @@ static void session(struct cv710 *c)
 		wr(c, VX, 0x0d, vx[1]);
 		for (int i = 0; i < 4; i++)
 			wr(c, GPIO, pca_regs[i], pca[i]);
+		led_idle(c);
 	}
 }
 
@@ -575,6 +640,12 @@ struct cv710 *cv710_start(const struct cv710_callbacks *callbacks)
 		return NULL;
 	}
 	return c;
+}
+
+void cv710_set_recording(struct cv710 *c, bool recording)
+{
+	if (c)
+		atomic_store(&c->recording, recording);
 }
 
 void cv710_stop(struct cv710 *c)
